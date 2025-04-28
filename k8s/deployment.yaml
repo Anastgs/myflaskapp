@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myflaskapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myflaskapp
+  template:
+    metadata:
+      labels:
+        app: myflaskapp
+    spec:
+      containers:
+      - name: myflaskapp
+        image: myflaskapp:v3
+        ports:
+        - containerPort: 5000
+        envFrom:
+        - configMapRef:
+            name: myflaskapp-config
+        resources:
+          requests:
+            cpu: "100m"
+          limits:
+            cpu: "500m"
