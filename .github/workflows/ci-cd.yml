@@ -80,14 +80,4 @@ jobs:
           # Vérification HPA
           kubectl get hpa
 
-      # Étape 8: Nettoyage (optionnel)
-      - name: Cleanup (optional)
-        if: always()
-        run: |
-          minikube delete
-      - name: Debug Pods
-  if: failure()
-  run: |
-    kubectl get pods
-    kubectl describe pod -l app=myflaskapp
-    kubectl logs -l app=myflaskapp --tail=50
+  
