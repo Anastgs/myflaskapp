@@ -12,19 +12,18 @@ spec:
       labels:
         app: myflaskapp
     spec:
-      template:
-        spec:
-          containers:
-          - name: myflaskapp
-            livenessProbe:
-              httpGet:
-                path: /health
-                port: 5000
-              initialDelaySeconds: 30
-              periodSeconds: 10
-            readinessProbe:
-              httpGet:
-                path: /health
-                port: 5000
-              initialDelaySeconds: 5
-              periodSeconds: 5
+      containers:
+        - name: myflaskapp
+          image: myflaskapp:latest
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: myflaskapp-config
+            - secretRef:
+                name: myflaskapp-secret
+          resources:
+            requests:
+              cpu: "100m"
+            limits:
+              cpu: "500m"
