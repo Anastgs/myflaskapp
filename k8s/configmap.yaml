@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myflaskapp-config
+data:
+  # tes variables ici
+  SAMPLE_KEY: "sample_value"
