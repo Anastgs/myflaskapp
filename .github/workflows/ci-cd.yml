@@ -1,77 +1,80 @@
 name: Flask App CI/CD Pipeline
- 
-# On déclenche à chaque push ou PR sur main
+
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
- 
+
 env:
-  IMAGE_NAME: myflaskapp:latest
- 
+  IMAGE_NAME: myflaskapp
+  CLUSTER_NAME: cicd-cluster
+
 jobs:
   build-test-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
- 
+      packages: write
+
     steps:
-    # 1) Checkout du code
-    - name: Checkout repository
-      uses: actions/checkout@v3
- 
-    # 2) Installer Kind et Kubectl
-    - name: Install Kubernetes tools & kind
-      run: |
-        # kubectl
-        curl -fsSL -o kubectl \
-          "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-        sudo install kubectl /usr/local/bin/
- 
-        # kind
-        curl -fsSL -o kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
-        sudo install kind /usr/local/bin/
- 
-        kubectl version --client
-        kind --version
- 
-    # 3) Créer un cluster Kind local
-    - name: Create kind cluster
-      run: |
-        kind create cluster --name cicd-cluster
-        kubectl cluster-info --context kind-cicd-cluster
- 
-    # 4) Build de l’image dans le Docker de Kind
-    - name: Build & load Docker image into kind
-      run: |
-        docker build -t $IMAGE_NAME .
-        kind load docker-image $IMAGE_NAME --name cicd-cluster
- 
-    # 5) Déployer sur le cluster Kind
-    - name: Deploy Kubernetes manifests
-      run: |
-        kubectl apply -f k8s/configmap.yaml
-        kubectl apply -f k8s/secret.yaml
-        kubectl apply -f k8s/service.yaml
-        kubectl apply -f k8s/deployment.yaml
-        kubectl apply -f k8s/ingress.yaml
-        kubectl apply -f k8s/hpa.yaml
- 
-    # 6) Attendre que le déploiement soit prêt
-    - name: Wait for deployment rollout
-      run: |
-        kubectl rollout status deployment/myflaskapp --timeout=120s
- 
-    # 7) Smoke-tests
-    - name: Smoke test endpoints
-      run: |
-        kubectl port-forward svc/myflaskapp-service 5000:80 &
-        sleep 5
-        curl -f http://127.0.0.1:5000/api/events
-        curl -f http://127.0.0.1:5000/api/news
- 
-    # 8) Nettoyage
-    - name: Delete kind cluster
-      if: always()
-      run: kind delete cluster --name cicd-cluster
+      # 1) Checkout source
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2) Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      # 3) Install kubectl & kind
+      - name: Install kubectl and kind
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          curl -fsSL https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 -o kind
+          sudo install kind /usr/local/bin/kind
+          kind version && kubectl version --client
+
+      # 4) Create a Kind cluster
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name $CLUSTER_NAME
+          kubectl cluster-info --context kind-$CLUSTER_NAME
+
+      # 5) Build Docker image
+      - name: Build Docker image
+        run: |
+          docker build -t $IMAGE_NAME:latest .
+
+      # 6) Load image into Kind
+      - name: Load image into kind cluster
+        run: |
+          kind load docker-image $IMAGE_NAME:latest --name $CLUSTER_NAME
+
+      # 7) Deploy Kubernetes manifests
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/secret.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+          kubectl apply -f k8s/hpa.yaml
+
+      # 8) Wait for rollout with extended timeout
+      - name: Wait for deployment rollout
+        run: |
+          kubectl rollout status deployment/myflaskapp --timeout=300s
+
+      # 9) Smoke testing
+      - name: Smoke test endpoints
+        run: |
+          kubectl port-forward svc/myflaskapp-service 5000:80 &
+          sleep 5
+          curl -f http://localhost:5000/api/events
+          curl -f http://localhost:5000/api/news
+
+      # 10) Clean up Kind
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name $CLUSTER_NAME
