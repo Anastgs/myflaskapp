@@ -1,58 +1,80 @@
-name: CI/CD → Minikube
- 
+name: Flask App CI/CD Pipeline
+
 on:
   push:
     branches: [ main ]
- 
+  pull_request:
+    branches: [ main ]
+
+env:
+  IMAGE_NAME: myflaskapp
+  CLUSTER_NAME: cicd-cluster
+
 jobs:
-  build-and-deploy:
+  build-test-deploy:
     runs-on: ubuntu-latest
- 
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      # 1) Checkout du code
-      - name: Checkout code
+      # 1) Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v3
- 
-      # 2) Installer Docker Buildx
+
+      # 2) Set up Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
- 
-      # 3) Installer kubectl et minikube
-      - name: Install kubectl & Minikube
+
+      # 3) Install kubectl & kind
+      - name: Install kubectl and kind
         run: |
-          # kubectl
           curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          sudo install kubectl /usr/local/bin/
-          # minikube
-          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-          sudo install minikube-linux-amd64 /usr/local/bin/minikube
- 
-      # 4) Démarrer Minikube en mode Docker
-      - name: Start Minikube
-        run: minikube start --driver=docker
- 
-      # 5) Se logguer sur Docker Hub
-      - name: Login to Docker Hub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
- 
-      # 6) Build et charger l’image dans Minikube
-      - name: Build & load image
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          curl -fsSL https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 -o kind
+          sudo install kind /usr/local/bin/kind
+          kind version && kubectl version --client
+
+      # 4) Create a Kind cluster
+      - name: Create kind cluster
         run: |
-          docker build -t myflaskapp:latest .
-          minikube image load myflaskapp:latest
- 
-      # 7) Déployer les manifests K8s
-      - name: Deploy to Minikube
+          kind create cluster --name $CLUSTER_NAME
+          kubectl cluster-info --context kind-$CLUSTER_NAME
+
+      # 5) Build Docker image
+      - name: Build Docker image
         run: |
+          docker build -t $IMAGE_NAME:latest .
+
+      # 6) Load image into Kind
+      - name: Load image into kind cluster
+        run: |
+          kind load docker-image $IMAGE_NAME:latest --name $CLUSTER_NAME
+
+      # 7) Deploy Kubernetes manifests
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/secret.yaml
           kubectl apply -f k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/ingress.yaml
           kubectl apply -f k8s/hpa.yaml
-          kubectl rollout status deployment/myflaskapp --timeout=120s
- 
-      # 8) Smoke-test rapide
-      - name: Smoke test
+
+      # 8) Wait for rollout with extended timeout
+      - name: Wait for deployment rollout
+        run: |
+          kubectl rollout status deployment/myflaskapp --timeout=300s
+
+      # 9) Smoke testing
+      - name: Smoke test endpoints
         run: |
           kubectl port-forward svc/myflaskapp-service 5000:80 &
           sleep 5
-          curl -f http://127.0.0.1:5000/ || exit 1
+          curl -f http://localhost:5000/api/events
+          curl -f http://localhost:5000/api/news
+
+      # 10) Clean up Kind
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name $CLUSTER_NAME

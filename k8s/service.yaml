@@ -1,0 +1,27 @@
+apiVersion: v1
+
+kind: Service
+
+metadata:
+
+  name: myflaskapp-service
+
+spec:
+
+  type: NodePort
+
+  selector:
+
+    app: myflaskapp
+
+  ports:
+
+    - protocol: TCP
+
+      port: 80        # Port exposé interne & Ingress
+
+      targetPort: 5000  # Port sur lequel Flask écoute
+
+      nodePort: 30549   # (optionnel, fixé à 30549 pour minikube)
+
+ 
